@@ -1,0 +1,2 @@
+stock,rows,signal_nan_count,signal_nan_pct,first_valid_timestamp,signal_mean,signal_std,signal_min,signal_max
+AMZN,16199,5,0.00030866102845854683,2024-01-01 09:30:05,-3.4364132872841243e-06,0.0002093097587857062,-0.0019186057788744826,0.001792435741767906
