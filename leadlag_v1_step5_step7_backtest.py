@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import pandas as pd
 
-from leadlag_v1_step3_step4 import LOOKBACK_SECONDS, TARGET_STOCK
 from leadlag_v1_step1_preprocessing import Step1Config, prepare_step1_panel
-from leadlag_v1_step3_step4 import add_future_returns, build_signal_panel, compute_equal_weight_signal
+from leadlag_v1_step3_step4 import LOOKBACK_SECONDS, add_future_returns, build_signal_panel, compute_equal_weight_signal
 
 
 OUTPUT_DIR = Path("leadlag_v1_outputs")
@@ -16,16 +14,15 @@ BUY_SIDE = "BUY"
 SIGNAL_QUANTILE = 0.80
 
 
-def prepare_amzn_signal_panel() -> pd.DataFrame:
-    config = Step1Config(data_dir=Path("."))
+def prepare_signal_panel() -> pd.DataFrame:
+    config = Step1Config()
     aligned_panel, mid_matrix = prepare_step1_panel(config)
     _, signals = compute_equal_weight_signal(mid_matrix, LOOKBACK_SECONDS)
     signal_panel = build_signal_panel(aligned_panel, signals)
     signal_panel = add_future_returns(signal_panel, mid_matrix, [])
-    signal_panel = signal_panel[signal_panel["stock"] == TARGET_STOCK].copy()
     signal_panel["minute"] = signal_panel["timestamp"].dt.floor("min")
     signal_panel["second_in_minute"] = signal_panel["timestamp"].dt.second
-    return signal_panel.sort_values("timestamp").reset_index(drop=True)
+    return signal_panel.sort_values(["stock", "timestamp"]).reset_index(drop=True)
 
 
 def build_buy_benchmark(signal_panel: pd.DataFrame) -> pd.DataFrame:
@@ -45,7 +42,7 @@ def build_buy_benchmark(signal_panel: pd.DataFrame) -> pd.DataFrame:
 def build_buy_strategy(signal_panel: pd.DataFrame, theta: float) -> pd.DataFrame:
     trades = []
 
-    for minute, group in signal_panel.groupby("minute", sort=True):
+    for (stock, minute), group in signal_panel.groupby(["stock", "minute"], sort=True):
         group = group.reset_index(drop=True)
         triggered_trade = None
 
@@ -54,7 +51,7 @@ def build_buy_strategy(signal_panel: pd.DataFrame, theta: float) -> pd.DataFrame
             if pd.notna(signal_t) and signal_t > theta:
                 exec_row = group.loc[idx + 1]
                 triggered_trade = {
-                    "stock": TARGET_STOCK,
+                    "stock": stock,
                     "minute": minute,
                     "signal_trigger_time": group.loc[idx, "timestamp"],
                     "execution_time": exec_row["timestamp"],
@@ -66,7 +63,7 @@ def build_buy_strategy(signal_panel: pd.DataFrame, theta: float) -> pd.DataFrame
         if triggered_trade is None:
             exec_row = group.iloc[-1]
             triggered_trade = {
-                "stock": TARGET_STOCK,
+                "stock": stock,
                 "minute": minute,
                 "signal_trigger_time": pd.NaT,
                 "execution_time": exec_row["timestamp"],
@@ -122,13 +119,17 @@ def summarize_results(comparison: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
 
 
 def save_plots(stock_summary: pd.DataFrame, comparison: pd.DataFrame) -> tuple[Path, Path]:
-    avg_bar_path = BACKTEST_OUTPUT_DIR / f"buy_average_improvement_bar_{TARGET_STOCK}.png"
-    hist_path = BACKTEST_OUTPUT_DIR / f"buy_improvement_histogram_{TARGET_STOCK}.png"
+    avg_bar_path = BACKTEST_OUTPUT_DIR / "buy_average_improvement_bar_all.png"
+    hist_path = BACKTEST_OUTPUT_DIR / "buy_improvement_histogram_all.png"
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return avg_bar_path, hist_path
 
     fig, ax = plt.subplots(figsize=(6, 4))
     ax.bar(stock_summary["stock"], stock_summary["average_improvement"], color="#2E86AB")
     ax.axhline(0, color="black", linewidth=1)
-    ax.set_title(f"Average Buy Improvement vs Benchmark ({TARGET_STOCK})")
+    ax.set_title("Average Buy Improvement vs Benchmark (All Stocks)")
     ax.set_xlabel("Stock")
     ax.set_ylabel("Average Improvement")
     fig.tight_layout()
@@ -138,7 +139,7 @@ def save_plots(stock_summary: pd.DataFrame, comparison: pd.DataFrame) -> tuple[P
     fig, ax = plt.subplots(figsize=(7, 4))
     ax.hist(comparison["improvement"], bins=30, color="#F18F01", edgecolor="black", alpha=0.8)
     ax.axvline(comparison["improvement"].mean(), color="black", linestyle="--", linewidth=2)
-    ax.set_title(f"Buy Improvement Distribution ({TARGET_STOCK})")
+    ax.set_title("Buy Improvement Distribution (All Stocks)")
     ax.set_xlabel("Benchmark Price - Strategy Price")
     ax.set_ylabel("Frequency")
     fig.tight_layout()
@@ -151,24 +152,27 @@ def save_plots(stock_summary: pd.DataFrame, comparison: pd.DataFrame) -> tuple[P
 def main() -> None:
     BACKTEST_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    signal_panel = prepare_amzn_signal_panel()
-    theta = signal_panel["signal"].quantile(SIGNAL_QUANTILE)
+    signal_panel = prepare_signal_panel()
+    theta_by_stock = signal_panel.groupby("stock")["signal"].quantile(SIGNAL_QUANTILE).to_dict()
 
     benchmark_log = build_buy_benchmark(signal_panel)
-    strategy_log = build_buy_strategy(signal_panel, theta)
+    strategy_frames = []
+    for stock, stock_panel in signal_panel.groupby("stock", sort=True):
+        strategy_frames.append(build_buy_strategy(stock_panel, theta_by_stock[stock]))
+    strategy_log = pd.concat(strategy_frames, ignore_index=True)
     comparison = compare_strategy_vs_benchmark(strategy_log, benchmark_log)
     stock_summary, overall_summary = summarize_results(comparison)
     avg_bar_path, hist_path = save_plots(stock_summary, comparison)
 
-    benchmark_log.to_csv(BACKTEST_OUTPUT_DIR / f"buy_benchmark_log_{TARGET_STOCK}.csv", index=False)
-    strategy_log.to_csv(BACKTEST_OUTPUT_DIR / f"buy_strategy_log_{TARGET_STOCK}.csv", index=False)
-    comparison.to_csv(BACKTEST_OUTPUT_DIR / f"buy_strategy_vs_benchmark_{TARGET_STOCK}.csv", index=False)
-    stock_summary.to_csv(BACKTEST_OUTPUT_DIR / f"buy_summary_by_stock_{TARGET_STOCK}.csv", index=False)
-    overall_summary.to_csv(BACKTEST_OUTPUT_DIR / f"buy_summary_overall_{TARGET_STOCK}.csv", index=False)
+    benchmark_log.to_csv(BACKTEST_OUTPUT_DIR / "buy_benchmark_log_all.csv", index=False)
+    strategy_log.to_csv(BACKTEST_OUTPUT_DIR / "buy_strategy_log_all.csv", index=False)
+    comparison.to_csv(BACKTEST_OUTPUT_DIR / "buy_strategy_vs_benchmark_all.csv", index=False)
+    stock_summary.to_csv(BACKTEST_OUTPUT_DIR / "buy_summary_by_stock_all.csv", index=False)
+    overall_summary.to_csv(BACKTEST_OUTPUT_DIR / "buy_summary_overall_all.csv", index=False)
 
     print("STEP 5 BENCHMARK CHECK")
     print("=" * 80)
-    print(f"target_stock = {TARGET_STOCK}")
+    print(f"stocks = {', '.join(sorted(theta_by_stock))}")
     print(f"side = {BUY_SIDE}")
     print(f"benchmark trades = {len(benchmark_log)}")
     print()
@@ -178,7 +182,9 @@ def main() -> None:
 
     print("STEP 6 STRATEGY CHECK")
     print("=" * 80)
-    print(f"signal_threshold_theta = {theta:.8f}")
+    print("signal_threshold_theta_by_stock:")
+    for stock, theta in sorted(theta_by_stock.items()):
+        print(f"  {stock}: {theta:.8f}")
     print(f"strategy trades = {len(strategy_log)}")
     print()
     print("Strategy sample:")
@@ -211,11 +217,11 @@ def main() -> None:
     )
     print()
     print("Saved files:")
-    print(BACKTEST_OUTPUT_DIR / f"buy_benchmark_log_{TARGET_STOCK}.csv")
-    print(BACKTEST_OUTPUT_DIR / f"buy_strategy_log_{TARGET_STOCK}.csv")
-    print(BACKTEST_OUTPUT_DIR / f"buy_strategy_vs_benchmark_{TARGET_STOCK}.csv")
-    print(BACKTEST_OUTPUT_DIR / f"buy_summary_by_stock_{TARGET_STOCK}.csv")
-    print(BACKTEST_OUTPUT_DIR / f"buy_summary_overall_{TARGET_STOCK}.csv")
+    print(BACKTEST_OUTPUT_DIR / "buy_benchmark_log_all.csv")
+    print(BACKTEST_OUTPUT_DIR / "buy_strategy_log_all.csv")
+    print(BACKTEST_OUTPUT_DIR / "buy_strategy_vs_benchmark_all.csv")
+    print(BACKTEST_OUTPUT_DIR / "buy_summary_by_stock_all.csv")
+    print(BACKTEST_OUTPUT_DIR / "buy_summary_overall_all.csv")
     print(avg_bar_path)
     print(hist_path)
 
