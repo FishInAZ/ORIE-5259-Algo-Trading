@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import pandas as pd
 
 from leadlag_v1_step1_preprocessing import Step1Config, prepare_step1_panel
@@ -13,7 +12,6 @@ FUTURE_HORIZONS = [1, 3, 5]
 N_QUANTILES = 5
 OUTPUT_DIR = Path("leadlag_v1_outputs")
 SIGNAL_OUTPUT_DIR = OUTPUT_DIR / "step3_step4_signal"
-TARGET_STOCK = "AMZN"
 
 
 def compute_equal_weight_signal(mid_matrix: pd.DataFrame, lookback_seconds: int) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -105,6 +103,11 @@ def compute_quintile_table(signal_panel: pd.DataFrame, horizon: int, n_quantiles
 
 
 def make_sanity_plot(quintile_table: pd.DataFrame, horizon: int, output_dir: Path) -> Path:
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return output_dir / f"signal_quintile_vs_future_return_all_{horizon}s.png"
+
     subset = quintile_table[quintile_table["horizon"] == f"{horizon}s"]
     fig, ax = plt.subplots(figsize=(9, 5))
 
@@ -118,7 +121,7 @@ def make_sanity_plot(quintile_table: pd.DataFrame, horizon: int, output_dir: Pat
     ax.legend()
     fig.tight_layout()
 
-    output_path = output_dir / f"signal_quintile_vs_future_return_{TARGET_STOCK}_{horizon}s.png"
+    output_path = output_dir / f"signal_quintile_vs_future_return_all_{horizon}s.png"
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
     return output_path
@@ -127,16 +130,12 @@ def make_sanity_plot(quintile_table: pd.DataFrame, horizon: int, output_dir: Pat
 def main() -> None:
     SIGNAL_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    config = Step1Config(data_dir=Path("."))
+    config = Step1Config()
     aligned_panel, mid_matrix = prepare_step1_panel(config)
-
-    if TARGET_STOCK not in mid_matrix.columns:
-        raise ValueError(f"TARGET_STOCK={TARGET_STOCK} is not available in the data.")
 
     past_returns, signals = compute_equal_weight_signal(mid_matrix, LOOKBACK_SECONDS)
     signal_panel = build_signal_panel(aligned_panel, signals)
     signal_panel = add_future_returns(signal_panel, mid_matrix, FUTURE_HORIZONS)
-    signal_panel = signal_panel[signal_panel["stock"] == TARGET_STOCK].copy()
 
     signal_quality = summarize_signal_quality(signal_panel)
     signal_quality["first_valid_timestamp"] = signal_quality["first_valid_timestamp"].map(
@@ -145,7 +144,7 @@ def main() -> None:
 
     print("STEP 3 SIGNAL CHECK")
     print("=" * 80)
-    print(f"target_stock = {TARGET_STOCK}")
+    print(f"stocks = {', '.join(mid_matrix.columns)}")
     print(f"lookback_seconds = {LOOKBACK_SECONDS}")
     print()
     print("Signal sample:")
@@ -174,14 +173,14 @@ def main() -> None:
         print()
 
     final_quintile_table = pd.concat(all_quintile_tables, ignore_index=True)
-    signal_panel.to_csv(SIGNAL_OUTPUT_DIR / f"signal_panel_{TARGET_STOCK}.csv", index=False)
-    final_quintile_table.to_csv(SIGNAL_OUTPUT_DIR / f"signal_quintile_tables_{TARGET_STOCK}.csv", index=False)
-    signal_quality.to_csv(SIGNAL_OUTPUT_DIR / f"signal_quality_summary_{TARGET_STOCK}.csv", index=False)
+    signal_panel.to_csv(SIGNAL_OUTPUT_DIR / "signal_panel_all.csv", index=False)
+    final_quintile_table.to_csv(SIGNAL_OUTPUT_DIR / "signal_quintile_tables_all.csv", index=False)
+    signal_quality.to_csv(SIGNAL_OUTPUT_DIR / "signal_quality_summary_all.csv", index=False)
 
     print("Saved files:")
-    print(SIGNAL_OUTPUT_DIR / f"signal_panel_{TARGET_STOCK}.csv")
-    print(SIGNAL_OUTPUT_DIR / f"signal_quintile_tables_{TARGET_STOCK}.csv")
-    print(SIGNAL_OUTPUT_DIR / f"signal_quality_summary_{TARGET_STOCK}.csv")
+    print(SIGNAL_OUTPUT_DIR / "signal_panel_all.csv")
+    print(SIGNAL_OUTPUT_DIR / "signal_quintile_tables_all.csv")
+    print(SIGNAL_OUTPUT_DIR / "signal_quality_summary_all.csv")
 
 
 if __name__ == "__main__":

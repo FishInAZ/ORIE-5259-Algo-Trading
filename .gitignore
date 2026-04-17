@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+
+# Large intermediate artifacts; keep summary outputs under version control.
+leadlag_v1_outputs/step3_step4_signal/signal_panel_all.csv
+leadlag_v1_outputs/step5_step7_backtest/buy_benchmark_log_all.csv
+leadlag_v1_outputs/step5_step7_backtest/buy_strategy_log_all.csv
+leadlag_v1_outputs/step5_step7_backtest/buy_strategy_vs_benchmark_all.csv

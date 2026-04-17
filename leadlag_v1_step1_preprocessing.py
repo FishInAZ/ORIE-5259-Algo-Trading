@@ -19,7 +19,7 @@ BASE_COLUMNS = ["BidPrice_1", "AskPrice_1", "BidSize_1", "AskSize_1"]
 
 @dataclass(frozen=True)
 class Step1Config:
-    data_dir: Path
+    data_dir: Path = Path("Project_Train_Datasets")
     session_date: str = "2024-01-01"
     resample_freq: str = "1s"
 
@@ -123,7 +123,7 @@ def prepare_step1_panel(config: Step1Config, symbols: Iterable[str] | None = Non
 
 
 if __name__ == "__main__":
-    cfg = Step1Config(data_dir=Path("."))
+    cfg = Step1Config()
     aligned_panel, mid_matrix = prepare_step1_panel(cfg)
 
     print("Aligned panel shape:", aligned_panel.shape)
