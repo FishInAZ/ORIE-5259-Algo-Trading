@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from leadlag_v1_step1_preprocessing import Step1Config, prepare_step1_panel
-from leadlag_v1_step3_step4 import build_signal_panel, compute_equal_weight_signal
+from Strategy_2.leadlag_v1_step1_preprocessing import Step1Config, prepare_step1_panel
+from Strategy_2.leadlag_v1_step3_step4 import build_signal_panel, compute_equal_weight_signal
 
 
 OUTPUT_DIR = Path("leadlag_v1_outputs")

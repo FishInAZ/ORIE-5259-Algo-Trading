@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from leadlag_v1_step1_preprocessing import Step1Config, prepare_step1_panel
+from Strategy_2.leadlag_v1_step1_preprocessing import Step1Config, prepare_step1_panel
 
 
 LOOKBACK_SECONDS = 5
