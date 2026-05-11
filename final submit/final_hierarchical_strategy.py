@@ -531,58 +531,6 @@ def threshold_dict(strategy: StockStrategy) -> Dict[str, Dict[str, float]]:
     }
 
 
-def execute_strategy4_threshold(
-    df: pd.DataFrame,
-    thresholds: Dict[str, Dict[str, float]],
-    fallback: str = "last",
-) -> pd.DataFrame:
-    trades = []
-    df = df.sort_values(["stock", "minute", "ts"]).copy()
-
-    for (stock, minute), g in df.groupby(["stock", "minute"], sort=False):
-        g = g.sort_values("ts").reset_index(drop=True)
-        buy_th = thresholds[stock]["buy_threshold"]
-        sell_th = thresholds[stock]["sell_threshold"]
-
-        buy_hits = g[g["pred_buy_regret"] <= buy_th]
-        sell_hits = g[g["pred_sell_regret"] <= sell_th]
-
-        if len(buy_hits) > 0:
-            buy_row = buy_hits.iloc[0]
-            buy_trigger = "threshold_hit"
-        else:
-            buy_row = g.iloc[-1] if fallback == "last" else g.iloc[0]
-            buy_trigger = f"fallback_{fallback}"
-
-        if len(sell_hits) > 0:
-            sell_row = sell_hits.iloc[0]
-            sell_trigger = "threshold_hit"
-        else:
-            sell_row = g.iloc[-1] if fallback == "last" else g.iloc[0]
-            sell_trigger = f"fallback_{fallback}"
-
-        sample = g["sample"].iloc[0] if "sample" in g.columns else "unknown"
-        trades.append(
-            {
-                "stock": stock,
-                "minute": minute,
-                "sample": sample,
-                "algo_buy_time": buy_row["ts"],
-                "algo_sell_time": sell_row["ts"],
-                "algo_buy_price": buy_row["ask1"],
-                "algo_sell_price": sell_row["bid1"],
-                "pred_buy_regret": buy_row["pred_buy_regret"],
-                "pred_sell_regret": sell_row["pred_sell_regret"],
-                "buy_threshold": buy_th,
-                "sell_threshold": sell_th,
-                "buy_trigger": buy_trigger,
-                "sell_trigger": sell_trigger,
-            }
-        )
-
-    return pd.DataFrame(trades).sort_values(["stock", "minute"]).reset_index(drop=True)
-
-
 def execute_hierarchical_strategy(
     df: pd.DataFrame,
     thresholds: Dict[str, Dict[str, float]],
@@ -658,52 +606,6 @@ def execute_hierarchical_strategy(
         )
 
     return pd.DataFrame(trades).sort_values(["stock", "minute"]).reset_index(drop=True)
-
-
-def tune_strategy4_threshold_values(
-    val_pred_df: pd.DataFrame,
-    stock: str,
-    quantile_grid: Sequence[float] = THRESHOLD_QUANTILE_GRID,
-) -> Tuple[float, float, float, pd.DataFrame]:
-    stock = canonical_stock(stock)
-    twap_val = execute_twap(val_pred_df)
-
-    buy_candidates = val_pred_df["pred_buy_regret"].quantile(quantile_grid).values
-    sell_candidates = val_pred_df["pred_sell_regret"].quantile(quantile_grid).values
-
-    best_score = -np.inf
-    best_buy_th = float(buy_candidates[0])
-    best_sell_th = float(sell_candidates[0])
-    rows = []
-
-    for buy_th in buy_candidates:
-        for sell_th in sell_candidates:
-            thresholds = {stock: {"buy_threshold": float(buy_th), "sell_threshold": float(sell_th)}}
-            candidate_trades = execute_strategy4_threshold(val_pred_df, thresholds, fallback="last")
-            metric = evaluate_required_metric(
-                candidate_trades,
-                twap_val,
-                "Strategy 4 Alpha-Filtered Ridge",
-                "val",
-            )
-            score = metric["PCT_IMPROVEMENT"]
-            rows.append(
-                {
-                    "stock": stock,
-                    "buy_threshold": float(buy_th),
-                    "sell_threshold": float(sell_th),
-                    "validation_improvement": score,
-                    "buy_trigger_rate": (candidate_trades["buy_trigger"] == "threshold_hit").mean(),
-                    "sell_trigger_rate": (candidate_trades["sell_trigger"] == "threshold_hit").mean(),
-                }
-            )
-
-            if pd.notna(score) and score > best_score:
-                best_score = float(score)
-                best_buy_th = float(buy_th)
-                best_sell_th = float(sell_th)
-
-    return best_buy_th, best_sell_th, best_score, pd.DataFrame(rows)
 
 
 def evaluate_required_metric(
@@ -929,11 +831,17 @@ def run_m2_style_validation(
         selected_features["sell"],
     )
 
+    signal_df = add_hierarchical_filter_signals(pred_df)
     val_pred_df = pred_df[pred_df["sample"] == "val"].copy()
-    best_buy_th, best_sell_th, best_score, threshold_search = tune_strategy4_threshold_values(
-        val_pred_df,
+    val_signal_df = signal_df[signal_df["sample"] == "val"].copy()
+    twap_val = execute_twap(val_pred_df)
+    best_buy_q, best_sell_q, best_score, threshold_search = tune_threshold_quantiles(
+        val_signal_df,
         stock,
+        twap_tune=twap_val,
     )
+    best_buy_th = quantile_threshold(val_signal_df["pred_buy_regret"], best_buy_q)
+    best_sell_th = quantile_threshold(val_signal_df["pred_sell_regret"], best_sell_q)
 
     strategy = StockStrategy(
         stock=canonical_stock(stock),
@@ -941,14 +849,13 @@ def run_m2_style_validation(
         sell_model=sell_model,
         buy_features=selected_features["buy"],
         sell_features=selected_features["sell"],
-        buy_threshold_quantile=np.nan,
-        sell_threshold_quantile=np.nan,
+        buy_threshold_quantile=best_buy_q,
+        sell_threshold_quantile=best_sell_q,
         buy_threshold=best_buy_th,
         sell_threshold=best_sell_th,
         validation_improvement=best_score,
     )
 
-    signal_df = add_hierarchical_filter_signals(pred_df)
     trades = execute_hierarchical_strategy(signal_df, threshold_dict(strategy), fallback="last")
     twap = execute_twap(pred_df)
 
