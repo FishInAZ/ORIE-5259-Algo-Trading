@@ -1028,6 +1028,7 @@ def save_if_not_empty(df: pd.DataFrame, path: Path) -> None:
         df.to_csv(path, index=False)
 
 
+
 def plot_improvement_summary(eval_df: pd.DataFrame, output_dir: Path) -> None:
     if eval_df.empty or "PCT_IMPROVEMENT" not in eval_df.columns:
         return
