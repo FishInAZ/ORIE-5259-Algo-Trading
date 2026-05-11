@@ -36,7 +36,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 
-REPO_ROOT = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent if SCRIPT_DIR.name.lower() == "final submit" else SCRIPT_DIR
 DEFAULT_STOCKS = ("AMZN", "GOOG", "INTC", "MSFT", "AAPL")
 
 CANDIDATE_ALPHA_COLS = [
@@ -60,8 +61,6 @@ CANDIDATE_ALPHA_COLS = [
     "total_ask_size_5_chg1",
     "sec_in_min",
     "event_idx_in_min",
-    "n_events_in_min",
-    "event_frac_in_min",
 ]
 
 T_STAT_CUTOFF = 2.0
@@ -236,13 +235,8 @@ def build_orderbook_features(raw_df: pd.DataFrame, stock: str, path_hint: str = 
     for col in change_cols:
         df[f"{col}_chg1"] = df[col].diff().fillna(0)
 
+    # This is observable online: number of events already seen in the current minute.
     df["event_idx_in_min"] = df.groupby("minute").cumcount()
-    df["n_events_in_min"] = df.groupby("minute")["minute"].transform("size")
-    df["event_frac_in_min"] = np.where(
-        df["n_events_in_min"] > 1,
-        df["event_idx_in_min"] / (df["n_events_in_min"] - 1),
-        0.0,
-    )
 
     df["future_min_ask_in_min"] = df.groupby("minute")["ask1"].transform(
         lambda s: s.iloc[::-1].cummin().iloc[::-1]
